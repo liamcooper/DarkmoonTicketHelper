@@ -99,12 +99,12 @@ function ns.CreateUI()
 
   -- Shared panels under the summary
   local turninPanel = CreateFrame("Frame", nil, f)
-  turninPanel:SetPoint("TOPLEFT", 8, -95)
+  turninPanel:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", -6, -10)
   turninPanel:SetPoint("BOTTOMRIGHT", -8, 8)
   f.turninPanel = turninPanel
 
   local rewardPanel = CreateFrame("Frame", nil, f)
-  rewardPanel:SetPoint("TOPLEFT", 8, -95)
+  rewardPanel:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", -6, -10)
   rewardPanel:SetPoint("BOTTOMRIGHT", -8, 8)
   rewardPanel:Hide()
   f.rewardPanel = rewardPanel
@@ -173,6 +173,12 @@ function ns.CreateUI()
   end)
   f.hideCheck = hideCheck
 
+  local shoppingBtn = CreateFrame("Button", nil, turninPanel, "UIPanelButtonTemplate")
+  shoppingBtn:SetSize(165, 22)
+  shoppingBtn:SetPoint("TOPLEFT", 6, -28)
+  shoppingBtn:SetText("Create Auctionator list")
+  shoppingBtn:SetScript("OnClick", function() ns.CreateAuctionatorList() end)
+
   local turninHeaders = {
     { text = "Turn-in", x = 34, w = 200 },
     { text = "Tier", x = 244, w = 40 },
@@ -183,14 +189,14 @@ function ns.CreateUI()
   }
   for _, h in ipairs(turninHeaders) do
     local fs = turninPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fs:SetPoint("TOPLEFT", h.x, -28)
+    fs:SetPoint("TOPLEFT", h.x, -56)
     fs:SetWidth(h.w)
     fs:SetJustifyH("LEFT")
     fs:SetText(h.text)
   end
 
   local scroll = CreateFrame("ScrollFrame", "DarkmoonTicketHelperScroll", turninPanel, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", 4, -46)
+  scroll:SetPoint("TOPLEFT", 4, -74)
   scroll:SetPoint("BOTTOMRIGHT", -26, 4)
 
   local content = CreateFrame("Frame", nil, scroll)
@@ -257,6 +263,12 @@ function ns.CreateUI()
         ), 1, 0.82, 0)
         if self.remaining and self.remaining ~= math.huge then
           GameTooltip:AddLine(string.format("≈ %d turn-ins left before this tier cuts off", self.remaining), 1, 0.82, 0)
+        end
+        if self.planStep then
+          local step = self.planStep
+          GameTooltip:AddLine(string.format("Exact route: %d turn-ins → %d tickets", step.count, step.count * data.tickets), 0.2, 1, 0.2)
+          GameTooltip:AddLine(string.format("Use %d owned; acquire %d more (%s)", math.min(data.bag, step.count * t.qty), step.buy, ns.FormatMoney(step.buy * (data.unitPrice or 0))), 1, 1, 1)
+          GameTooltip:AddLine("Complete planned lower tiers first to preserve reputation access.", 1, 0.82, 0, true)
         end
         if data and data.craftable then
           GameTooltip:AddLine(" ")
@@ -621,26 +633,25 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
   ))
 
   local rows = ns.BuildRanking()
-  local best = ns.BestAvailable(rows)
-  if best and best.costPerTicket and need > 0 then
-    local turnIns = math.ceil(need / best.tickets)
-    local totalCost = best.turnInCost * turnIns
-    local itemsNeeded = best.turnin.qty * turnIns
-    f.hint:SetText(string.format(
-      "Cheapest now: %s — %s / ticket. ≈ %d turn-ins (%d× %s) ≈ %s",
-      best.turnin.name,
-      ns.FormatMoney(best.costPerTicket),
-      turnIns,
-      itemsNeeded,
-      best.turnin.name,
-      ns.FormatMoney(totalCost)
-    ))
-  elseif best and not best.costPerTicket then
-    f.hint:SetText("Cheapest available turn-in has no price yet — scan AH or right-click a row to set one.")
-  elseif need <= 0 then
+  local plan = ns.BuildExactPlan(rows, need)
+  if need <= 0 then
     f.hint:SetText("Target reached. Turn-ins still ranked below if you want more tickets.")
+  elseif plan then
+    local buy, craft = {}, {}
+    for _, step in ipairs(plan.steps) do
+      if step.buy > 0 then
+        local list = step.row.source == "craft" and craft or buy
+        list[#list + 1] = string.format("%d × %s", step.buy, step.row.turnin.name)
+      end
+    end
+    local lines = {}
+    if #buy > 0 then lines[#lines + 1] = "Buy: " .. table.concat(buy, ", ") end
+    if #craft > 0 then lines[#lines + 1] = "Craft: " .. table.concat(craft, ", ") end
+    if #lines == 0 then lines[1] = "Nothing to buy — you already own all the turn-in items needed." end
+    lines[#lines + 1] = string.format("Total: %s · +%d tickets to reach %d (owned items included).", ns.FormatMoney(plan.cost), plan.tickets, target)
+    f.hint:SetText(table.concat(lines, "\n"))
   else
-    f.hint:SetText("No turn-ins available at this level / reputation. Lower tiers vanish as DMF rep rises — finish them first.")
+    f.hint:SetText("No exact route at this level / reputation with known prices and owned items. Scan AH or set missing prices.")
   end
 
   for i, rowFrame in ipairs(f.rows) do
@@ -651,6 +662,7 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
       rowFrame.itemId = t.itemId
       rowFrame.turnin = t
       rowFrame.data = data
+      rowFrame.planStep = plan and plan.byKey[t.key]
       rowFrame.remaining = data.remaining
       rowFrame.icon:SetTexture(textureForItem(t.itemId))
       rowFrame.name:SetText(string.format("%s ×%d", t.name, t.qty))
@@ -666,9 +678,6 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
       elseif data.source == "none" then
         rowFrame.name:SetTextColor(1, 0.82, 0)
         rowFrame.cost:SetTextColor(1, 0.82, 0)
-      elseif best and data.turnin.key == best.turnin.key then
-        rowFrame.name:SetTextColor(0.2, 1, 0.2)
-        rowFrame.cost:SetTextColor(0.2, 1, 0.2)
       elseif data.source == "craft" then
         rowFrame.name:SetTextColor(0.4, 0.85, 1)
         rowFrame.cost:SetTextColor(1, 1, 1)

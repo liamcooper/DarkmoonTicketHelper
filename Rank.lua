@@ -50,9 +50,15 @@ end
 function ns.GetTicketCount()
   if C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
     local info = C_CurrencyInfo.GetCurrencyInfo(ns.CURRENCY_TICKET)
-    if info and info.quantity then
+    if info and info.quantity and info.quantity > 0 then
       return info.quantity
     end
+  end
+  -- Classic stores Prize Tickets as items rather than currency.
+  if C_Item and C_Item.GetItemCount then
+    return C_Item.GetItemCount(19182, false) or 0
+  elseif GetItemCount then
+    return GetItemCount(19182, false) or 0
   end
   return 0
 end
@@ -76,7 +82,7 @@ function ns.IsTierAvailable(tier, level, standingID, valueInStanding)
 end
 
 --- Remaining turn-ins before this tier's cutoff, given current rep.
---- Uses floor division; humans hit the wall sooner.
+--- A turn-in is allowed while below the cutoff, even if its rep crosses it.
 function ns.RemainingTurnInsForTier(tier, standingID, valueInStanding)
   local info = ns.TIERS[tier]
   if not info then
@@ -92,12 +98,12 @@ function ns.RemainingTurnInsForTier(tier, standingID, valueInStanding)
       local neutralLeft = math.max(0, 3000 - valueInStanding)
       local friendlyRoom = info.cutoffValue
       local room = neutralLeft + friendlyRoom
-      return math.floor(room / ns.GetRepPerTurnIn())
+      return math.ceil(room / ns.GetRepPerTurnIn())
     end
     return math.huge
   end
   local room = math.max(0, info.cutoffValue - valueInStanding)
-  return math.floor(room / ns.GetRepPerTurnIn())
+  return math.ceil(room / ns.GetRepPerTurnIn())
 end
 
 function ns.BuildRanking()
@@ -180,4 +186,65 @@ function ns.BestAvailable(rows)
     end
   end
   return nil
+end
+
+
+-- Process tiers in ascending order so low-rep quests are completed first.
+-- State includes total turn-ins because all tiers share reputation headroom.
+-- Each item is processed once: its owned stock is deducted once, including
+-- partial stacks. Unknown prices allow only fully owned turn-ins.
+function ns.BuildExactPlan(rows, need)
+  need = math.max(0, math.floor(need))
+  local candidates, capacity = {}, 0
+  for _, row in ipairs(rows) do
+    if row.available then
+      candidates[#candidates + 1] = row
+      capacity = math.max(capacity, row.remaining * row.tickets)
+    end
+  end
+  if need > capacity then return nil end
+  table.sort(candidates, function(a, b)
+    if a.turnin.tier ~= b.turnin.tier then return a.turnin.tier < b.turnin.tier end
+    return a.turnin.key < b.turnin.key
+  end)
+  local states = { [0] = { [0] = { cost = 0 } } }
+  for _, row in ipairs(candidates) do
+    local nextStates = {}
+    for tickets, counts in pairs(states) do
+      nextStates[tickets] = {}
+      for count, state in pairs(counts) do nextStates[tickets][count] = state end
+    end
+    for tickets, counts in pairs(states) do
+      for count, state in pairs(counts) do
+        local limit = math.min(math.floor((need - tickets) / row.tickets), row.remaining - count)
+        if not row.unitPrice then limit = math.min(limit, row.readyTurnIns) end
+        for n = 1, limit do
+          local buy = math.max(0, n * row.turnin.qty - row.bag)
+          local cost = state.cost + buy * (row.unitPrice or 0)
+          local total, turns = tickets + n * row.tickets, count + n
+          nextStates[total] = nextStates[total] or {}
+          local old = nextStates[total][turns]
+          if not old or cost < old.cost then
+            nextStates[total][turns] = { cost = cost, previous = state, row = row, count = n, buy = buy }
+          end
+        end
+      end
+    end
+    states = nextStates
+  end
+  local best, bestCount
+  for count, state in pairs(states[need] or {}) do
+    if not best or state.cost < best.cost or (state.cost == best.cost and count < bestCount) then
+      best, bestCount = state, count
+    end
+  end
+  if not best then return nil end
+  local plan = { cost = best.cost, tickets = need, turnIns = bestCount, steps = {}, byKey = {} }
+  while best.row do
+    local step = { row = best.row, count = best.count, buy = best.buy }
+    table.insert(plan.steps, 1, step)
+    plan.byKey[best.row.turnin.key] = step
+    best = best.previous
+  end
+  return plan
 end

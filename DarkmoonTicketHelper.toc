@@ -11,5 +11,6 @@ Data.lua
 Prices.lua
 Recipes.lua
 Rank.lua
+Shopping.lua
 UI.lua
 Core.lua
