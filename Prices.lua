@@ -108,3 +108,76 @@ function ns.FormatMoneyEdit(copper)
   -- Keep two decimals of gold for easy typing.
   return string.format("%.2f", g)
 end
+
+function ns.GetItemName(itemId)
+  if C_Item and C_Item.GetItemNameByID then
+    local name = C_Item.GetItemNameByID(itemId)
+    if name then
+      return name
+    end
+  end
+  local name = GetItemInfo and GetItemInfo(itemId)
+  return name
+end
+
+--- Shift-click helper: exact Auctionator search (AH must be open), else insert item link.
+function ns.SearchAuctionHouse(itemId)
+  if not itemId then
+    return
+  end
+  if C_Item and C_Item.RequestLoadItemDataByID then
+    C_Item.RequestLoadItemDataByID(itemId)
+  end
+
+  local name = ns.GetItemName(itemId) or ns.REAGENT_NAMES[itemId]
+  if not name then
+    for _, turnin in ipairs(ns.TURNINS) do
+      if turnin.itemId == itemId then
+        name = turnin.name
+        break
+      end
+    end
+  end
+  if not name and ns.REWARDS then
+    for _, reward in ipairs(ns.REWARDS) do
+      if reward.itemId == itemId then
+        name = reward.name
+        break
+      end
+    end
+  end
+  if not name then
+    print("|cff00ccffDMTH|r Item name not loaded yet — try shift-click again.")
+    return
+  end
+
+  local api = Auctionator and Auctionator.API and Auctionator.API.v1
+  if api then
+    local terms = { name }
+    if api.MultiSearchExact then
+      local ok, err = pcall(api.MultiSearchExact, ns.CALLER_ID, terms)
+      if ok then
+        return
+      end
+      print("|cff00ccffDMTH|r Auctionator search failed — is the AH open? (" .. tostring(err) .. ")")
+      return
+    end
+    if api.MultiSearch then
+      local ok, err = pcall(api.MultiSearch, ns.CALLER_ID, terms)
+      if ok then
+        return
+      end
+      print("|cff00ccffDMTH|r Auctionator search failed — is the AH open? (" .. tostring(err) .. ")")
+      return
+    end
+  end
+
+  local link
+  if GetItemInfo then
+    link = select(2, GetItemInfo(itemId))
+  end
+  if link and ChatEdit_InsertLink and ChatEdit_InsertLink(link) then
+    return
+  end
+  print("|cff00ccffDMTH|r Open the Auction House (Auctionator) to search for: " .. name)
+end

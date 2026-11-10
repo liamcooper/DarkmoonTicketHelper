@@ -298,14 +298,21 @@ function ns.CreateUI()
             end
           end
         end
-        GameTooltip:AddLine("Right-click to edit unit price", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Shift-click: search AH  ·  Right-click: edit price", 0.6, 0.6, 0.6)
       end
       GameTooltip:Show()
     end)
     row:SetScript("OnLeave", GameTooltip_Hide)
     row:SetScript("OnClick", function(self, button)
-      if button == "RightButton" and self.itemId then
+      if not self.itemId then
+        return
+      end
+      if button == "RightButton" then
         ns.PromptPrice(self.itemId, self.turnin and self.turnin.name)
+        return
+      end
+      if button == "LeftButton" and (IsShiftKeyDown() or IsModifiedClick("CHATLINK")) then
+        ns.SearchAuctionHouse(self.itemId)
       end
     end)
 
@@ -408,16 +415,23 @@ function ns.CreateUI()
       if self.shortfall and self.shortfall > 0 then
         GameTooltip:AddLine(string.format("Need %d more tickets", self.shortfall), 1, 0.4, 0.4)
       end
+      GameTooltip:AddLine("Shift-click: search AH  ·  Click: set ticket target", 0.6, 0.6, 0.6)
       GameTooltip:Show()
     end)
     row:SetScript("OnLeave", GameTooltip_Hide)
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", function(self)
-      if self.reward then
-        ns.EnsureDB()
-        DarkmoonTicketHelperDB.target = self.reward.tickets
-        setTabActive(f, "turnins")
-        ns.RefreshUI()
+      if not self.reward then
+        return
       end
+      if IsShiftKeyDown() or IsModifiedClick("CHATLINK") then
+        ns.SearchAuctionHouse(self.reward.itemId)
+        return
+      end
+      ns.EnsureDB()
+      DarkmoonTicketHelperDB.target = self.reward.tickets
+      setTabActive(f, "turnins")
+      ns.RefreshUI()
     end)
 
     f.rewardRows[i] = row
