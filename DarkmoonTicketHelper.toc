@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: Darkmoon Ticket Helper
+## Notes: Ranks Darkmoon Faire turn-ins by gold cost per Prize Ticket. Auctionator prices with manual overrides.
+## Author: Liam
+## Version: 1.1.0
+## SavedVariables: DarkmoonTicketHelperDB
+## OptionalDeps: Auctionator
+## IconTexture: Interface\Icons\INV_Misc_Ticket_Darkmoon_01
+
+Data.lua
+Prices.lua
+Rank.lua
+UI.lua
+Core.lua
