@@ -110,7 +110,7 @@ function ns.BuildRanking()
   for _, turnin in ipairs(ns.TURNINS) do
     local available, reason = ns.IsTierAvailable(turnin.tier, level, standingID, valueInStanding)
     if available or not hideUnavailable then
-      local unitPrice, source = ns.GetUnitPrice(turnin.itemId)
+      local unitPrice, source, buyPrice, craftPrice = ns.GetEffectiveUnitPrice(turnin.itemId)
       local tierInfo = ns.TIERS[turnin.tier]
       local turnInCost = unitPrice and (unitPrice * turnin.qty) or nil
       local costPerTicket = turnInCost and (turnInCost / tierInfo.tickets) or nil
@@ -128,6 +128,9 @@ function ns.BuildRanking()
         unavailableReason = reason,
         unitPrice = unitPrice,
         source = source,
+        buyPrice = buyPrice,
+        craftPrice = craftPrice,
+        craftable = ns.IsCraftable(turnin.itemId),
         turnInCost = turnInCost,
         costPerTicket = costPerTicket,
         tickets = tierInfo.tickets,

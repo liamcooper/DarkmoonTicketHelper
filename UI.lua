@@ -10,11 +10,18 @@ local function textureForItem(itemId)
   return tex or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
-local function sourceLabel(source)
-  if source == "override" then
+local function sourceLabel(source, row)
+  if source == "craft" then
+    return "craft"
+  elseif source == "buy" or source == "auctionator" then
+    return "buy"
+  elseif source == "override" then
     return "manual"
-  elseif source == "auctionator" then
-    return "AH"
+  elseif source == "vendor" then
+    return "vendor"
+  end
+  if row and row.craftable then
+    return "no price"
   end
   return "no price"
 end
@@ -172,7 +179,7 @@ function ns.CreateUI()
     { text = "Tickets", x = 289, w = 50 },
     { text = "Cost / ticket", x = 349, w = 100 },
     { text = "Bags", x = 459, w = 50 },
-    { text = "Source", x = 514, w = 70 },
+    { text = "Via", x = 514, w = 70 },
   }
   for _, h in ipairs(turninHeaders) do
     local fs = turninPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -235,6 +242,7 @@ function ns.CreateUI()
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:SetItemByID(self.itemId)
       local t = self.turnin
+      local data = self.data
       if t then
         local npc = ns.NPCS[t.category]
         GameTooltip:AddLine(" ")
@@ -249,6 +257,46 @@ function ns.CreateUI()
         ), 1, 0.82, 0)
         if self.remaining and self.remaining ~= math.huge then
           GameTooltip:AddLine(string.format("≈ %d turn-ins left before this tier cuts off", self.remaining), 1, 0.82, 0)
+        end
+        if data and data.craftable then
+          GameTooltip:AddLine(" ")
+          GameTooltip:AddLine("Buy vs craft (per item)", 1, 1, 1)
+          GameTooltip:AddDoubleLine("Buy AH/manual", ns.FormatMoney(data.buyPrice), 0.8, 0.8, 0.8, 1, 1, 1)
+          GameTooltip:AddDoubleLine("Craft from mats", ns.FormatMoney(data.craftPrice), 0.8, 0.8, 0.8, 1, 1, 1)
+          if data.buyPrice and data.craftPrice then
+            if data.craftPrice < data.buyPrice then
+              GameTooltip:AddLine(
+                string.format("Cheaper to craft (save %s)", ns.FormatMoney(data.buyPrice - data.craftPrice)),
+                0.2, 1, 0.2
+              )
+            elseif data.buyPrice < data.craftPrice then
+              GameTooltip:AddLine(
+                string.format("Cheaper to buy (save %s)", ns.FormatMoney(data.craftPrice - data.buyPrice)),
+                0.2, 1, 0.2
+              )
+            else
+              GameTooltip:AddLine("Buy and craft cost the same", 0.8, 0.8, 0.8)
+            end
+          elseif data.source == "craft" then
+            GameTooltip:AddLine("Using craft cost (no AH buy price)", 0.2, 1, 0.2)
+          elseif data.buyPrice and not data.craftPrice then
+            GameTooltip:AddLine("Craft cost unknown — missing mat prices", 1, 0.82, 0)
+          end
+          local recipe = ns.RECIPES[t.itemId]
+          if recipe then
+            GameTooltip:AddLine(" ")
+            local yieldNote = (recipe.yield or 1) > 1 and string.format(" (makes %d)", recipe.yield) or ""
+            GameTooltip:AddLine("Recipe" .. yieldNote .. ":", 0.4, 0.8, 1)
+            for _, reagent in ipairs(recipe.reagents) do
+              local name = ns.REAGENT_NAMES[reagent[1]] or ("item " .. reagent[1])
+              local matPrice = select(1, ns.GetEffectiveUnitPrice(reagent[1]))
+              GameTooltip:AddDoubleLine(
+                string.format("%dx %s", reagent[2], name),
+                matPrice and ns.FormatMoney(matPrice * reagent[2]) or "—",
+                0.8, 0.8, 0.8, 0.8, 0.8, 0.8
+              )
+            end
+          end
         end
         GameTooltip:AddLine("Right-click to edit unit price", 0.6, 0.6, 0.6)
       end
@@ -424,10 +472,37 @@ function ns.PromptPrice(itemId, name)
   StaticPopup_Show("DMTH_SET_PRICE", name or ("item " .. itemId))
 end
 
+local function priceEditorItems()
+  local seen, items = {}, {}
+  local function add(itemId, name, kind)
+    if seen[itemId] then
+      return
+    end
+    seen[itemId] = true
+    items[#items + 1] = { itemId = itemId, name = name, kind = kind }
+  end
+  for _, turnin in ipairs(ns.TURNINS) do
+    add(turnin.itemId, turnin.name, ns.IsCraftable(turnin.itemId) and "craft" or "drop")
+  end
+  for itemId, name in pairs(ns.REAGENT_NAMES) do
+    add(itemId, name, "mat")
+  end
+  table.sort(items, function(a, b)
+    if a.kind ~= b.kind then
+      local order = { craft = 1, drop = 2, mat = 3 }
+      return (order[a.kind] or 9) < (order[b.kind] or 9)
+    end
+    return a.name < b.name
+  end)
+  return items
+end
+
 function ns.ShowPriceEditor()
+  local items = priceEditorItems()
+
   if not ns.priceFrame then
     local pf = CreateFrame("Frame", "DarkmoonTicketHelperPrices", UIParent, "BasicFrameTemplateWithInset")
-    pf:SetSize(420, 520)
+    pf:SetSize(440, 520)
     pf:SetPoint("LEFT", ns.frame or UIParent, "RIGHT", 10, 0)
     pf:SetMovable(true)
     pf:EnableMouse(true)
@@ -449,38 +524,38 @@ function ns.ShowPriceEditor()
 
     local note = pf:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     note:SetPoint("LEFT", clear, "RIGHT", 10, 0)
-    note:SetText("Blank = use Auctionator / none")
+    note:SetText("Blank = Auctionator / vendor")
 
     local scroll = CreateFrame("ScrollFrame", nil, pf, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 12, -60)
     scroll:SetPoint("BOTTOMRIGHT", -30, 12)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(360, 28 * #ns.TURNINS)
+    content:SetSize(380, 28 * #items)
     scroll:SetScrollChild(content)
     pf.content = content
     pf.editors = {}
 
-    for i, turnin in ipairs(ns.TURNINS) do
+    for i, entry in ipairs(items) do
       local row = CreateFrame("Frame", nil, content)
-      row:SetSize(360, 26)
+      row:SetSize(380, 26)
       row:SetPoint("TOPLEFT", 0, -(i - 1) * 28)
 
       local icon = row:CreateTexture(nil, "ARTWORK")
       icon:SetSize(18, 18)
       icon:SetPoint("LEFT", 2, 0)
-      icon:SetTexture(textureForItem(turnin.itemId))
+      icon:SetTexture(textureForItem(entry.itemId))
 
       local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
       label:SetPoint("LEFT", icon, "RIGHT", 6, 0)
-      label:SetWidth(200)
+      label:SetWidth(220)
       label:SetJustifyH("LEFT")
-      label:SetText(turnin.name)
+      label:SetText(entry.name)
 
       local box = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
       box:SetSize(90, 20)
       box:SetPoint("RIGHT", -4, 0)
       box:SetAutoFocus(false)
-      box.itemId = turnin.itemId
+      box.itemId = entry.itemId
       box:SetScript("OnEnterPressed", function(self)
         local text = self:GetText():match("^%s*(.-)%s*$") or ""
         if text == "" then
@@ -494,27 +569,21 @@ function ns.ShowPriceEditor()
         self:ClearFocus()
         ns.RefreshUI()
       end)
-      pf.editors[i] = box
+      pf.editors[i] = { box = box, entry = entry }
     end
 
     ns.priceFrame = pf
   end
 
   ns.EnsureDB()
-  for i, turnin in ipairs(ns.TURNINS) do
-    local box = ns.priceFrame.editors[i]
-    local override = DarkmoonTicketHelperDB.overrides[turnin.itemId]
+  for _, editor in ipairs(ns.priceFrame.editors) do
+    local itemId = editor.box.itemId
+    local override = DarkmoonTicketHelperDB.overrides[itemId]
     if override then
-      box:SetText(ns.FormatMoneyEdit(override))
+      editor.box:SetText(ns.FormatMoneyEdit(override))
     else
-      local ah = nil
-      if ns.HasAuctionator() then
-        local ok, price = pcall(Auctionator.API.v1.GetAuctionPriceByItemID, ns.CALLER_ID, turnin.itemId)
-        if ok then
-          ah = price
-        end
-      end
-      box:SetText(ah and ns.FormatMoneyEdit(ah) or "")
+      local buy = select(1, ns.GetBuyUnitPrice(itemId))
+      editor.box:SetText(buy and ns.FormatMoneyEdit(buy) or "")
     end
   end
   ns.priceFrame:Show()
@@ -567,6 +636,7 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
       rowFrame:Show()
       rowFrame.itemId = t.itemId
       rowFrame.turnin = t
+      rowFrame.data = data
       rowFrame.remaining = data.remaining
       rowFrame.icon:SetTexture(textureForItem(t.itemId))
       rowFrame.name:SetText(string.format("%s ×%d", t.name, t.qty))
@@ -574,7 +644,7 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
       rowFrame.tickets:SetText(tostring(data.tickets))
       rowFrame.cost:SetText(data.costPerTicket and ns.FormatMoney(data.costPerTicket) or "—")
       rowFrame.bags:SetText(string.format("%d (%d)", data.bag, data.readyTurnIns))
-      rowFrame.src:SetText(sourceLabel(data.source))
+      rowFrame.src:SetText(sourceLabel(data.source, data))
 
       if not data.available then
         rowFrame.name:SetTextColor(0.5, 0.5, 0.5)
@@ -585,6 +655,9 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
       elseif best and data.turnin.key == best.turnin.key then
         rowFrame.name:SetTextColor(0.2, 1, 0.2)
         rowFrame.cost:SetTextColor(0.2, 1, 0.2)
+      elseif data.source == "craft" then
+        rowFrame.name:SetTextColor(0.4, 0.85, 1)
+        rowFrame.cost:SetTextColor(1, 1, 1)
       else
         rowFrame.name:SetTextColor(1, 1, 1)
         rowFrame.cost:SetTextColor(1, 1, 1)
@@ -592,6 +665,7 @@ local function refreshTurnins(f, tickets, target, need, standingName, valueInSta
     else
       rowFrame:Hide()
       rowFrame.itemId = nil
+      rowFrame.data = nil
     end
   end
 
