@@ -2,7 +2,7 @@
 ## Title: Darkmoon Ticket Helper
 ## Notes: Ranks Darkmoon Faire turn-ins by gold cost per Prize Ticket. Auctionator prices with manual overrides.
 ## Author: Liam
-## Version: 1.2.1
+## Version: 1.2.2
 ## SavedVariables: DarkmoonTicketHelperDB
 ## OptionalDeps: Auctionator
 ## IconTexture: Interface\Icons\INV_Misc_Ticket_Darkmoon_01

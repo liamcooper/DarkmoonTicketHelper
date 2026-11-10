@@ -310,7 +310,7 @@ function ns.CreateUI()
             end
           end
         end
-        GameTooltip:AddLine("Shift-click: search AH  ·  Right-click: edit price", 0.6, 0.6, 0.6)
+        GameTooltip:AddLine("Shift-click: search AH or link item  ·  Right-click: edit price", 0.6, 0.6, 0.6)
       end
       GameTooltip:Show()
     end)
@@ -427,7 +427,7 @@ function ns.CreateUI()
       if self.shortfall and self.shortfall > 0 then
         GameTooltip:AddLine(string.format("Need %d more tickets", self.shortfall), 1, 0.4, 0.4)
       end
-      GameTooltip:AddLine("Shift-click: search AH  ·  Click: set ticket target", 0.6, 0.6, 0.6)
+      GameTooltip:AddLine("Shift-click: search AH or link item  ·  Click: set ticket target", 0.6, 0.6, 0.6)
       GameTooltip:Show()
     end)
     row:SetScript("OnLeave", GameTooltip_Hide)

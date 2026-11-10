@@ -120,7 +120,38 @@ function ns.GetItemName(itemId)
   return name
 end
 
---- Shift-click helper: exact Auctionator search (AH must be open), else insert item link.
+function ns.GetItemLink(itemId, name)
+  if not itemId then
+    return nil
+  end
+  if GetItemInfo then
+    local link = select(2, GetItemInfo(itemId))
+    if link then
+      return link
+    end
+  end
+  -- Fallback link so shift-click still works before item data is fully cached.
+  name = name or ns.GetItemName(itemId) or ("item " .. itemId)
+  return string.format("|cffffffff|Hitem:%d::::::::|h[%s]|h|r", itemId, name)
+end
+
+local function insertItemLink(itemId, name)
+  local link = ns.GetItemLink(itemId, name)
+  if not link then
+    return false
+  end
+  if HandleModifiedItemClick and HandleModifiedItemClick(link) then
+    return true
+  end
+  if ChatEdit_InsertLink and ChatEdit_InsertLink(link) then
+    return true
+  end
+  -- No chat box open — drop a clickable link in chat so it still goes somewhere.
+  print("|cff00ccffDMTH|r " .. link)
+  return true
+end
+
+--- Shift-click: Auctionator exact search when the AH is open; otherwise link the item.
 function ns.SearchAuctionHouse(itemId)
   if not itemId then
     return
@@ -129,7 +160,7 @@ function ns.SearchAuctionHouse(itemId)
     C_Item.RequestLoadItemDataByID(itemId)
   end
 
-  local name = ns.GetItemName(itemId) or ns.REAGENT_NAMES[itemId]
+  local name = ns.GetItemName(itemId) or (ns.REAGENT_NAMES and ns.REAGENT_NAMES[itemId])
   if not name then
     for _, turnin in ipairs(ns.TURNINS) do
       if turnin.itemId == itemId then
@@ -155,29 +186,20 @@ function ns.SearchAuctionHouse(itemId)
   if api then
     local terms = { name }
     if api.MultiSearchExact then
-      local ok, err = pcall(api.MultiSearchExact, ns.CALLER_ID, terms)
+      local ok = pcall(api.MultiSearchExact, ns.CALLER_ID, terms)
       if ok then
         return
       end
-      print("|cff00ccffDMTH|r Auctionator search failed — is the AH open? (" .. tostring(err) .. ")")
-      return
-    end
-    if api.MultiSearch then
-      local ok, err = pcall(api.MultiSearch, ns.CALLER_ID, terms)
+    elseif api.MultiSearch then
+      local ok = pcall(api.MultiSearch, ns.CALLER_ID, terms)
       if ok then
         return
       end
-      print("|cff00ccffDMTH|r Auctionator search failed — is the AH open? (" .. tostring(err) .. ")")
-      return
     end
   end
 
-  local link
-  if GetItemInfo then
-    link = select(2, GetItemInfo(itemId))
-  end
-  if link and ChatEdit_InsertLink and ChatEdit_InsertLink(link) then
+  if insertItemLink(itemId, name) then
     return
   end
-  print("|cff00ccffDMTH|r Open the Auction House (Auctionator) to search for: " .. name)
+  print("|cff00ccffDMTH|r Could not link: " .. name)
 end
